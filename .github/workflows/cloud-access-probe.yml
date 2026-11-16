@@ -7,6 +7,11 @@ on:
         type: choice
         options: [headless, headed]
         default: headed
+      source:
+        description: Public page or its public showtimes API
+        type: choice
+        options: [page, api]
+        default: api
 permissions:
   contents: read
 concurrency:
@@ -30,11 +35,12 @@ jobs:
       - name: Probe source from a hosted runner
         env:
           BROWSER_MODE: ${{ inputs.browser_mode }}
+          SOURCE_MODE: ${{ inputs.source }}
         run: |
           if [ "$BROWSER_MODE" = "headed" ]; then
-            xvfb-run --auto-servernum python cloud-probe/probe.py --headed --rounds 2 --interval 60 --stagger 10
+            xvfb-run --auto-servernum python cloud-probe/probe.py --headed --rounds 2 --interval 60 --stagger 10 --source "$SOURCE_MODE"
           else
-            python cloud-probe/probe.py --rounds 2 --interval 60 --stagger 10
+            python cloud-probe/probe.py --rounds 2 --interval 60 --stagger 10 --source "$SOURCE_MODE"
           fi
       - name: Save sanitized source-access report
         if: always()

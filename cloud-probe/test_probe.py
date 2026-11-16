@@ -4,7 +4,7 @@ import sys
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from probe import validate_envelope, verdict
+from probe import validate_envelope, validate_api, verdict
 
 
 class ProbeTest(unittest.TestCase):
@@ -59,6 +59,22 @@ class ProbeTest(unittest.TestCase):
         envelope = self.envelope(); envelope["cookies"] = "must-not-export"
         envelope["shows"][0]["account"] = "must-not-export"
         self.assertNotIn("must-not-export", str(validate_envelope("2026-11-17", envelope)))
+
+    def test_api_response_requires_its_own_date_and_venue(self):
+        details = {"Date": "20261117", "Venues": {"VenueCode": "ALUC", "VenueName": "ALLU Cinemas: Kokapet", "isVenueDown": False},
+                   "Event": [{"EventTitle": "A Film", "ChildEvents": [{"EventCode": "ET1", "EventLanguage": "Telugu", "EventDimension": "3D",
+                   "ShowTimes": [{"ShowDateCode": "20261117", "ShowDateTime": "202611171100", "ShowTime": "11:00 AM", "Attributes": "DOLBY CINEMA", "AvailStatus": "3", "SessionId": "123"}]}]}]}
+        payload = {"ShowDetails": [details]}
+        url = self.envelope()["resolvedUrl"]
+        result = validate_api("2026-11-17", payload, url)
+        self.assertEqual("SUCCESS", result["kind"])
+        self.assertEqual("DOLBY_CINEMA", result["shows"][0]["format"])
+        self.assertEqual("UNSUPPORTED", validate_api("2026-11-18", payload, url)["kind"])
+        details["Venues"]["VenueCode"] = "OTHER"
+        self.assertEqual("UNSUPPORTED", validate_api("2026-11-17", payload, url)["kind"])
+
+    def test_api_does_not_infer_empty_from_missing_data(self):
+        self.assertEqual("UNSUPPORTED", validate_api("2026-11-17", {"ShowDetails": []}, self.envelope()["resolvedUrl"])["kind"])
 
 
 if __name__ == "__main__":

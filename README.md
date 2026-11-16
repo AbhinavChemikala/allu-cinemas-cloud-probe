@@ -6,6 +6,8 @@ The manual GitHub Actions workflow launches ordinary Chromium with standard mobi
 
 The workflow can test either headless Chromium or the full browser under Xvfb. Date checks are spaced 10 seconds apart and rounds 60 seconds apart. This changes browser execution and request pacing; it does not automate challenges or add stealth plugins.
 
+The `source` input also supports the public `/api/v3/mobile/showtimes/byvenue` endpoint observed in the website's JavaScript, with its public venue/date/region/app parameters. This request has no user login, copied cookies, API token, or member identifier. Its adapter requires the requested date and ALUC venue in the response; missing data is never inferred to mean an empty date.
+
 Reports contain only request status, timestamps, extractor hash, and public movie/show records. Browser profiles, cookies, page HTML, and arbitrary page state are never uploaded. Third-party workflow actions are pinned to verified commit SHAs.
 
 ## Run

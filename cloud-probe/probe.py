@@ -10,6 +10,7 @@ from pathlib import Path
 import re
 import sys
 from urllib.parse import urlsplit
+from urllib.parse import urlencode
 
 INDIA = timezone(timedelta(hours=5, minutes=30))
 
@@ -68,15 +69,53 @@ def verdict(samples: list[dict], positive_dates: list[str], rounds: int) -> bool
                    for sample in samples) for iteration in range(1, rounds + 1) for day in positive_dates)
 
 
-async def check(page, script: str, day: str) -> dict:
+def validate_api(day: str, payload: object, resolved_url: str) -> dict:
+    """Adapt the public by-venue API, requiring date/venue evidence in its response."""
+    unsupported = {"date": day, "kind": "UNSUPPORTED", "shows": []}
+    if not isinstance(payload, dict) or not isinstance(payload.get("ShowDetails"), list):
+        return unsupported
+    ymd = day.replace("-", "")
+    details = next((item for item in payload["ShowDetails"] if isinstance(item, dict) and item.get("Date") == ymd), None)
+    if not details or not isinstance(details.get("Venues"), dict):
+        return unsupported
+    venue = details["Venues"]
+    if venue.get("VenueCode") != "ALUC" or not re.search(r"ALLU Cinemas\s*:\s*Kokapet", str(venue.get("VenueName", "")), re.I):
+        return unsupported
+    movies = details.get("Event")
+    if not isinstance(movies, list):
+        return unsupported
+    records = []
+    for movie in movies:
+        for variant in movie.get("ChildEvents", []):
+            for show in variant.get("ShowTimes", []):
+                if show.get("ShowDateCode") != ymd or not str(show.get("ShowDateTime", "")).startswith(ymd):
+                    continue
+                status = {"2": "FAST_FILLING", "3": "AVAILABLE"}.get(str(show.get("AvailStatus")), "UNKNOWN") if venue.get("isVenueDown") is False else "UNKNOWN"
+                records.append({"title": movie.get("EventTitle") or variant.get("EventName", ""),
+                                "movieId": variant.get("EventCode", ""), "language": variant.get("EventLanguage", ""),
+                                "format": " · ".join(filter(None, [variant.get("EventDimension"), show.get("Attributes")])),
+                                "time": show.get("ShowTime", ""), "availability": status, "sessionId": str(show.get("SessionId", ""))})
+    return validate_envelope(day, {"resolvedUrl": resolved_url, "venue": "ALUC", "selectedDate": day,
+                                   "shows": records, "empty": not movies and venue.get("isVenueDown") is False})
+
+
+async def check(page, script: str, day: str, source: str = "page") -> dict:
     from playwright.async_api import TimeoutError as BrowserTimeout
     try:
-        response = await page.goto(venue_url(day), wait_until="domcontentloaded", timeout=30_000)
+        url = venue_url(day) if source == "page" else "https://in.bookmyshow.com/api/v3/mobile/showtimes/byvenue?" + urlencode(
+            {"dateCode": day.replace("-", ""), "venueCode": "ALUC", "regionCode": "HYD", "appCode": "WEBV2"})
+        response = await page.goto(url, wait_until="domcontentloaded", timeout=30_000)
         status = response.status if response else None
         if status in (403, 429):
             return {"date": day, "kind": "BLOCKED", "http_status": status, "shows": []}
         if status and status >= 400:
             return {"date": day, "kind": "NETWORK_FAILURE", "http_status": status, "shows": []}
+        if source == "api":
+            try:
+                payload = await response.json() if response else None
+                return validate_api(day, payload, page.url) | {"http_status": status}
+            except Exception:
+                return {"date": day, "kind": "UNSUPPORTED", "http_status": status, "shows": []}
         last = {"date": day, "kind": "UNSUPPORTED", "shows": []}
         for _ in range(20):
             payload = await page.evaluate(script.replace("__TARGET_DATE__", day))
@@ -109,7 +148,7 @@ async def run(args) -> int:
             for index, day in enumerate(positives + [future]):
                 if index:
                     await asyncio.sleep(args.stagger)
-                sample = await check(page, script, day)
+                sample = await check(page, script, day, args.source)
                 sample.update(round=iteration, checked_at=datetime.now(timezone.utc).isoformat())
                 samples.append(sample)
                 print(json.dumps({key: value for key, value in sample.items() if key != "shows"} |
@@ -121,6 +160,7 @@ async def run(args) -> int:
     eligible = verdict(samples, positives, args.rounds)
     report = {"schema_version": 1, "probe_only": True, "source": "ALUC", "start_date": base.isoformat(),
               "browser_mode": "headed" if args.headed else "headless", "stagger_seconds": args.stagger,
+              "source_mode": args.source,
               "extractor_sha256": hashlib.sha256(script.encode()).hexdigest(),
               "positive_dates": positives, "future_date": future,
               "eligible_for_monitoring": eligible, "samples": samples}
@@ -139,6 +179,7 @@ def main() -> int:
     parser.add_argument("--interval", type=int, choices=(30, 45, 60), default=30)
     parser.add_argument("--stagger", type=int, choices=(0, 5, 10, 15), default=10)
     parser.add_argument("--headed", action="store_true")
+    parser.add_argument("--source", choices=("page", "api"), default="page")
     parser.add_argument("--output", default="output/cloud-probe/report.json")
     args = parser.parse_args()
     return asyncio.run(run(args))
