@@ -101,12 +101,14 @@ async def run(args) -> int:
     script = Path(args.extractor).read_text(encoding="utf-8")
     samples = []
     async with async_playwright() as runtime:
-        browser = await runtime.chromium.launch(headless=True)
+        browser = await runtime.chromium.launch(headless=not args.headed)
         # Standard mobile browser emulation; no stealth plugin, borrowed cookies, or challenge automation.
         context = await browser.new_context(**runtime.devices["Pixel 7"])
         page = await context.new_page()
         for iteration in range(1, args.rounds + 1):
-            for day in positives + [future]:
+            for index, day in enumerate(positives + [future]):
+                if index:
+                    await asyncio.sleep(args.stagger)
                 sample = await check(page, script, day)
                 sample.update(round=iteration, checked_at=datetime.now(timezone.utc).isoformat())
                 samples.append(sample)
@@ -118,6 +120,7 @@ async def run(args) -> int:
         await browser.close()
     eligible = verdict(samples, positives, args.rounds)
     report = {"schema_version": 1, "probe_only": True, "source": "ALUC", "start_date": base.isoformat(),
+              "browser_mode": "headed" if args.headed else "headless", "stagger_seconds": args.stagger,
               "extractor_sha256": hashlib.sha256(script.encode()).hexdigest(),
               "positive_dates": positives, "future_date": future,
               "eligible_for_monitoring": eligible, "samples": samples}
@@ -134,6 +137,8 @@ def main() -> int:
     parser.add_argument("--start-date", default="")
     parser.add_argument("--rounds", type=int, choices=(1, 2, 3), default=2)
     parser.add_argument("--interval", type=int, choices=(30, 45, 60), default=30)
+    parser.add_argument("--stagger", type=int, choices=(0, 5, 10, 15), default=10)
+    parser.add_argument("--headed", action="store_true")
     parser.add_argument("--output", default="output/cloud-probe/report.json")
     args = parser.parse_args()
     return asyncio.run(run(args))

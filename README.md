@@ -4,6 +4,8 @@ This is a read-only source-access test for ALLU Cinemas Tracker. It is **not an 
 
 The manual GitHub Actions workflow launches ordinary Chromium with standard mobile-device emulation and executes the same extractor as the Android app. It checks two near-future dates and an unavailable/distant future date twice. A blocked request, wrong selected date, unsupported content, sold-out status, or unknown availability cannot pass the monitoring gate.
 
+The workflow can test either headless Chromium or the full browser under Xvfb. Date checks are spaced 10 seconds apart and rounds 60 seconds apart. This changes browser execution and request pacing; it does not automate challenges or add stealth plugins.
+
 Reports contain only request status, timestamps, extractor hash, and public movie/show records. Browser profiles, cookies, page HTML, and arbitrary page state are never uploaded. Third-party workflow actions are pinned to verified commit SHAs.
 
 ## Run

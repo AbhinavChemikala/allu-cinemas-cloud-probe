@@ -1,6 +1,12 @@
 name: Cloud access feasibility probe
 on:
   workflow_dispatch:
+    inputs:
+      browser_mode:
+        description: Browser mode for the bounded source-access probe
+        type: choice
+        options: [headless, headed]
+        default: headed
 permissions:
   contents: read
 concurrency:
@@ -22,7 +28,14 @@ jobs:
       - name: Validate result classification
         run: python -m unittest discover -s cloud-probe -p 'test_*.py' -v
       - name: Probe source from a hosted runner
-        run: python cloud-probe/probe.py --rounds 2 --interval 30
+        env:
+          BROWSER_MODE: ${{ inputs.browser_mode }}
+        run: |
+          if [ "$BROWSER_MODE" = "headed" ]; then
+            xvfb-run --auto-servernum python cloud-probe/probe.py --headed --rounds 2 --interval 60 --stagger 10
+          else
+            python cloud-probe/probe.py --rounds 2 --interval 60 --stagger 10
+          fi
       - name: Save sanitized source-access report
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
